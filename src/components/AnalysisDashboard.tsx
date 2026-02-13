@@ -189,12 +189,12 @@ export function AnalysisDashboard({ initialData, username }: AnalysisDashboardPr
       {summary.hire_recommendation && (
         <section className="animate-fade-up" style={{ animationDelay: '0.1s' }}>
           <Card className={`border-none shadow-2xl overflow-hidden rounded-2xl ${summary.hire_recommendation.decision === 'Strong Hire' ? 'glass glow-green' :
-              summary.hire_recommendation.decision === 'Consider' ? 'glass glow-accent' : 'glass border-destructive/20'
+            summary.hire_recommendation.decision === 'Consider' ? 'glass glow-accent' : 'glass border-destructive/20'
             }`}>
             <CardContent className="p-8 flex flex-col md:flex-row items-center gap-8">
               <div className="shrink-0 flex flex-col items-center gap-3">
                 <div className={`w-20 h-20 rounded-2xl flex items-center justify-center ${summary.hire_recommendation.decision === 'Strong Hire' ? 'bg-green-500/10 text-green-400' :
-                    summary.hire_recommendation.decision === 'Consider' ? 'bg-amber-500/10 text-amber-400' : 'bg-destructive/10 text-destructive'
+                  summary.hire_recommendation.decision === 'Consider' ? 'bg-amber-500/10 text-amber-400' : 'bg-destructive/10 text-destructive'
                   }`}>
                   {summary.hire_recommendation.decision === 'Strong Hire' ? <CheckCircle2 className="w-10 h-10" /> :
                     summary.hire_recommendation.decision === 'Consider' ? <AlertCircle className="w-10 h-10" /> : <XCircle className="w-10 h-10" />}
@@ -256,18 +256,21 @@ export function AnalysisDashboard({ initialData, username }: AnalysisDashboardPr
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2 text-muted-foreground uppercase tracking-wider">
               <Zap className="w-4 h-4 text-accent" />
-              Tech Debt
+              Code Health
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
-              <CircularScore score={debtScore} label="/10" />
-              <Badge className={`${debtScore > 6 ? 'bg-destructive/10 text-destructive' : debtScore > 4 ? 'bg-amber-500/10 text-amber-400' : 'bg-green-500/10 text-green-400'} rounded-lg`}>
-                {debtScore > 7 ? 'High Debt' : debtScore > 4 ? 'Moderate' : 'Excellent'}
-              </Badge>
+              <CircularScore score={10 - debtScore} label="/10" />
+              <div className="text-right space-y-1">
+                <Badge className={`${debtScore > 6 ? 'bg-destructive/10 text-destructive' : debtScore > 4 ? 'bg-amber-500/10 text-amber-400' : 'bg-green-500/10 text-green-400'} rounded-lg`}>
+                  {debtScore > 7 ? 'Needs Work' : debtScore > 4 ? 'Solid' : 'Excellent'}
+                </Badge>
+                <p className="text-[9px] text-muted-foreground">Tech Debt: {debtScore}/10</p>
+              </div>
             </div>
             <p className="text-[11px] text-muted-foreground italic leading-relaxed">
-              Calculated via code refinement frequency, documentation depth, and architectural patterns.
+              Higher is better. Based on code refinement, documentation depth, and architectural patterns.
             </p>
           </CardContent>
         </Card>

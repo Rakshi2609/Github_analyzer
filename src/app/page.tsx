@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useEffect, useRef, useState } from 'react';
 import { SpiralAnimation } from '@/components/ui/spiral-animation';
+import { GlowCard } from '@/components/ui/spotlight-card';
 
 export default function Home() {
   const [username, setUsername] = useState('');
@@ -171,21 +172,23 @@ export default function Home() {
             </a>
           </div>
 
-          {/* Feature cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-12">
+          {/* Feature cards with GlowCard spotlight effect */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-12">
             {features.map((f, i) => (
-              <div
-                key={f.title}
-                className="group flex flex-col items-center gap-3 p-5 rounded-2xl glass hover:bg-white/[0.05] transition-all duration-300 cursor-default animate-fade-up"
-                style={{ animationDelay: `${0.3 + i * 0.08}s` }}
-              >
-                <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 group-hover:bg-accent/15 transition-all">
-                  {f.icon}
-                </div>
-                <div className="text-center">
-                  <span className="text-sm font-semibold text-foreground">{f.title}</span>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed mt-1 hidden md:block">{f.desc}</p>
-                </div>
+              <div key={f.title} className="animate-fade-up" style={{ animationDelay: `${0.3 + i * 0.08}s` }}>
+                <GlowCard
+                  glowColor="purple"
+                  customSize
+                  className="!aspect-auto group flex flex-col items-center gap-3 !p-5 cursor-default"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 group-hover:bg-accent/15 transition-all relative z-10">
+                    {f.icon}
+                  </div>
+                  <div className="text-center relative z-10">
+                    <span className="text-sm font-semibold text-foreground">{f.title}</span>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed mt-1 hidden md:block">{f.desc}</p>
+                  </div>
+                </GlowCard>
               </div>
             ))}
           </div>
