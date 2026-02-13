@@ -23,10 +23,12 @@ function getHeaders(): Record<string, string> {
     'Accept': 'application/vnd.github.v3+json',
   };
 
-  // Check for token in multiple env var names
   const token = process.env.GITHUB_TOKEN || process.env.NEXT_PUBLIC_GITHUB_TOKEN || process.env.GH_TOKEN;
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+    console.log('[GitHub] Using authenticated requests (token found)');
+  } else {
+    console.warn('[GitHub] WARNING: No GITHUB_TOKEN found in .env — using unauthenticated requests (60 req/hr limit)');
   }
 
   return headers;
@@ -34,16 +36,19 @@ function getHeaders(): Record<string, string> {
 
 // Wrapper for GitHub API fetch with error handling
 async function githubFetch(url: string): Promise<Response> {
-  const res = await fetch(url, { headers: getHeaders() });
+  const headers = getHeaders();
+  const res = await fetch(url, { headers, cache: 'no-store' });
 
   if (res.status === 403) {
     const remaining = res.headers.get('x-ratelimit-remaining');
+    const limit = res.headers.get('x-ratelimit-limit');
+    console.error(`[GitHub] 403 Forbidden — Rate limit: ${remaining}/${limit}`);
     if (remaining === '0') {
       const resetTime = res.headers.get('x-ratelimit-reset');
       const resetDate = resetTime ? new Date(parseInt(resetTime) * 1000) : null;
       const waitMinutes = resetDate ? Math.ceil((resetDate.getTime() - Date.now()) / 60000) : '?';
       throw new Error(
-        `GitHub API rate limit exceeded. ${process.env.GITHUB_TOKEN ? `Resets in ~${waitMinutes} min.` : 'Add a GITHUB_TOKEN to your .env file to get 5000 requests/hour (currently using unauthenticated: 60/hour).'}`
+        `GitHub API rate limit exceeded. ${limit === '60' ? 'Your GITHUB_TOKEN is not being used! Make sure it is set correctly in .env and restart the dev server.' : `Resets in ~${waitMinutes} min.`}`
       );
     }
   }
@@ -61,11 +66,13 @@ async function githubFetch(url: string): Promise<Response> {
 
 export async function fetchGitHubUserData(username: string) {
   try {
+    const headers = getHeaders();
+
     // 1. Fetch user profile
     const userRes = await githubFetch(`https://api.github.com/users/${username}`);
     const user = await userRes.json();
 
-    // 2. Fetch repos (single call, sorted by updated)
+    // 2. Fetch repos
     const reposRes = await githubFetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=30`);
     const allRepos = await reposRes.json();
 
@@ -77,7 +84,12 @@ export async function fetchGitHubUserData(username: string) {
     const originalRepos = allRepos.filter((r: any) => !r.fork);
     const topRepos = originalRepos.slice(0, 10);
 
-    // Aggregate language distribution across ALL repos
+    // Aggregate stats
+    const totalStars = allRepos.reduce((sum: number, r: any) => sum + (r.stargazers_count || 0), 0);
+    const totalForks = allRepos.reduce((sum: number, r: any) => sum + (r.forks_count || 0), 0);
+    const totalWatchers = allRepos.reduce((sum: number, r: any) => sum + (r.watchers_count || 0), 0);
+    const forkedRepos = allRepos.filter((r: any) => r.fork).length;
+
     const languageMap: Record<string, number> = {};
     for (const repo of allRepos) {
       if (repo.language) {
@@ -89,28 +101,42 @@ export async function fetchGitHubUserData(username: string) {
       .map(([lang, count]) => `${lang}: ${count} repos`)
       .join(', ');
 
-    // 3. Deep-dive into top repos: README + recent commits
-    // Use Promise.allSettled to not fail if one repo errors
+    // 3. Fetch recent events (PRs, issues, contributions)
+    let prCount = 0;
+    let issueCount = 0;
+    let pushCount = 0;
+    try {
+      const eventsRes = await fetch(
+        `https://api.github.com/users/${username}/events/public?per_page=100`,
+        { headers, cache: 'no-store' }
+      );
+      if (eventsRes.ok) {
+        const events = await eventsRes.json();
+        if (Array.isArray(events)) {
+          prCount = events.filter((e: any) => e.type === 'PullRequestEvent').length;
+          issueCount = events.filter((e: any) => e.type === 'IssuesEvent').length;
+          pushCount = events.filter((e: any) => e.type === 'PushEvent').length;
+        }
+      }
+    } catch { /* skip */ }
+
+    // 4. Deep-dive into top repos
     const repoResults = await Promise.allSettled(
       topRepos.map(async (repo: any) => {
-        // Fetch README
         let readme = 'No README found';
         try {
           const readmeRes = await fetch(
             `https://api.github.com/repos/${username}/${repo.name}/readme`,
-            { headers: { ...getHeaders(), Accept: 'application/vnd.github.raw' } }
+            { headers: { ...headers, Accept: 'application/vnd.github.raw' }, cache: 'no-store' }
           );
-          if (readmeRes.ok) {
-            readme = await readmeRes.text();
-          }
+          if (readmeRes.ok) readme = await readmeRes.text();
         } catch { /* skip */ }
 
-        // Fetch recent commits
         let commits: any[] = [];
         try {
           const commitsRes = await fetch(
             `https://api.github.com/repos/${username}/${repo.name}/commits?per_page=5`,
-            { headers: getHeaders() }
+            { headers, cache: 'no-store' }
           );
           if (commitsRes.ok) {
             const data = await commitsRes.json();
@@ -123,6 +149,8 @@ export async function fetchGitHubUserData(username: string) {
           description: repo.description || 'No description',
           language: repo.language,
           stars: repo.stargazers_count,
+          forks: repo.forks_count,
+          open_issues: repo.open_issues_count,
           readme: readme.substring(0, 3000),
           commits: commits.map((c: any) => ({
             message: c.commit?.message || '',
@@ -132,7 +160,6 @@ export async function fetchGitHubUserData(username: string) {
       })
     );
 
-    // Extract successful results, use fallback for failed ones
     const repoDetails = repoResults.map((result, i) => {
       if (result.status === 'fulfilled') return result.value;
       return {
@@ -140,12 +167,14 @@ export async function fetchGitHubUserData(username: string) {
         description: topRepos[i]?.description || '',
         language: topRepos[i]?.language || null,
         stars: topRepos[i]?.stargazers_count || 0,
+        forks: 0,
+        open_issues: 0,
         readme: 'Could not fetch details',
         commits: []
       };
     });
 
-    // Build summary string for AI analysis
+    // Build enriched summary string for AI
     const summaryString = `
 USER: ${user.login}
 BIO: ${user.bio || 'N/A'}
@@ -155,13 +184,23 @@ FOLLOWERS: ${user.followers}
 FOLLOWING: ${user.following}
 ACCOUNT CREATED: ${user.created_at}
 
-LANGUAGE DISTRIBUTION (across ${allRepos.length} repos): ${languageBreakdown || 'N/A'}
+=== CONTRIBUTION & COMMUNITY IMPACT (treat these as POSITIVE indicators) ===
+TOTAL STARS RECEIVED: ${totalStars} (community recognition of useful work)
+TOTAL FORKS BY OTHERS: ${totalForks} (others building upon their work)
+TOTAL WATCHERS: ${totalWatchers}
+REPOS THEY FORKED (contributions to other projects): ${forkedRepos}
+RECENT PULL REQUESTS (last 100 events): ${prCount} PRs (collaboration & contribution)
+RECENT ISSUES FILED: ${issueCount} (engagement with community)
+RECENT PUSH EVENTS: ${pushCount} (active development)
 
-ANALYZED REPOSITORIES (${repoDetails.length} original, non-fork repos):
+=== LANGUAGE DISTRIBUTION (across ${allRepos.length} repos) ===
+${languageBreakdown || 'N/A'}
+
+=== ANALYZED REPOSITORIES (${repoDetails.length} original, non-fork repos) ===
 ${repoDetails.map(r => `
 --- REPO: ${r.name} ---
 LANGUAGE: ${r.language || 'N/A'}
-STARS: ${r.stars}
+⭐ STARS: ${r.stars} | 🍴 FORKS: ${r.forks} | ISSUES: ${r.open_issues}
 DESCRIPTION: ${r.description}
 README (excerpt): ${r.readme.substring(0, 1200)}
 RECENT COMMITS: ${r.commits.map(c => `[${c.date}] ${c.message}`).join(' | ') || 'No commits'}

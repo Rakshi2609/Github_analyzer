@@ -4,8 +4,8 @@
  * identify hiring signals and red flags, and suggest hire recommendations based on JD.
  */
 
-import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
+import { ai } from '@/ai/genkit';
+import { z } from 'genkit';
 
 const PillarScoreSchema = z.object({
   score: z.number().min(1).max(10),
@@ -46,16 +46,20 @@ export async function provideAnalysisSummaryAndRecommendations(input: ProvideAna
 
 const analysisSummaryPrompt = ai.definePrompt({
   name: 'analysisSummaryPrompt',
-  input: {schema: ProvideAnalysisSummaryAndRecommendationsInputSchema},
-  output: {schema: ProvideAnalysisSummaryAndRecommendationsOutputSchema},
-  system: `You are a Senior Technical Recruiter and Lead System Architect. 
+  input: { schema: ProvideAnalysisSummaryAndRecommendationsInputSchema },
+  output: { schema: ProvideAnalysisSummaryAndRecommendationsOutputSchema },
+  system: `You are a Senior Technical Recruiter and Lead System Architect evaluating GitHub profiles.
 
 CRITICAL INSTRUCTIONS:
-1. STRICTLY IGNORE DSA/COMPETITIVE PROGRAMMING: Do not reward "LeetCode" style repositories. Focus on systems engineering, product building, and architectural depth.
-2. PROFESSIONAL ROLE ONLY: Suggest a realistic industry role (e.g. "Cloud Native Architect", "Full-Stack Lead"). Avoid "Algorithm Specialist" or "Competitive Programmer".
-3. JOB FIT: If a Job Description (JD) is provided, be extremely critical about how their actual code matches the tech stack and requirements in the JD.
-4. EVIDENCE-BASED: Justify scores with specific patterns found in the provided READMEs or commit messages.`,
-  prompt: `Analyze the following GitHub data. 
+1. STARS, FORKS, AND PRS ARE POSITIVE: High star counts, forks by others, and pull request activity are STRONG positive signals of community impact, useful work, and collaboration. NEVER list these as red flags.
+2. CONTRIBUTION FOCUS: Prioritize how much the user contributes — PR activity, push frequency, issue engagement, and building projects others actually use (measured by stars/forks).
+3. IGNORE DSA/COMPETITIVE PROGRAMMING: Do not reward "LeetCode" style repos. Focus on systems engineering, product building, and real-world impact.
+4. PROFESSIONAL ROLE ONLY: Suggest a realistic industry role (e.g. "Cloud Native Architect", "Full-Stack Lead"). Avoid "Algorithm Specialist".
+5. JOB FIT: If a JD is provided, be critical about how their actual code matches the tech stack and requirements.
+6. EVIDENCE-BASED: Justify scores with specific patterns from READMEs, commit messages, stars, and PR activity.
+7. RED FLAGS ARE CODE QUALITY ONLY: Red flags should ONLY be about code quality, lack of documentation, poor commit hygiene, or architectural concerns. NEVER flag high stars, many repos, or active contribution as negative.
+8. HIRING SIGNALS: Include stars received, fork count, PR activity, and community impact as positive hiring signals.`,
+  prompt: `Analyze the following GitHub data. Pay special attention to the CONTRIBUTION & COMMUNITY IMPACT section — these metrics (stars, forks, PRs) are POSITIVE indicators of a strong engineer.
 
 {{#if jobDescription}}
 EVALUATE AGAINST THIS JOB DESCRIPTION:
@@ -75,7 +79,7 @@ const provideAnalysisSummaryAndRecommendationsFlow = ai.defineFlow(
     outputSchema: ProvideAnalysisSummaryAndRecommendationsOutputSchema,
   },
   async (input) => {
-    const {output} = await analysisSummaryPrompt(input);
+    const { output } = await analysisSummaryPrompt(input);
     return output!;
   }
 );
