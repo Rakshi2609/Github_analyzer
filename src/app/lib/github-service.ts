@@ -17,28 +17,63 @@ export interface GitHubCommit {
   };
 }
 
+// Build auth headers if GITHUB_TOKEN is set
+function getHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Accept': 'application/vnd.github.v3+json',
+  };
+
+  // Check for token in multiple env var names
+  const token = process.env.GITHUB_TOKEN || process.env.NEXT_PUBLIC_GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  return headers;
+}
+
+// Wrapper for GitHub API fetch with error handling
+async function githubFetch(url: string): Promise<Response> {
+  const res = await fetch(url, { headers: getHeaders() });
+
+  if (res.status === 403) {
+    const remaining = res.headers.get('x-ratelimit-remaining');
+    if (remaining === '0') {
+      const resetTime = res.headers.get('x-ratelimit-reset');
+      const resetDate = resetTime ? new Date(parseInt(resetTime) * 1000) : null;
+      const waitMinutes = resetDate ? Math.ceil((resetDate.getTime() - Date.now()) / 60000) : '?';
+      throw new Error(
+        `GitHub API rate limit exceeded. ${process.env.GITHUB_TOKEN ? `Resets in ~${waitMinutes} min.` : 'Add a GITHUB_TOKEN to your .env file to get 5000 requests/hour (currently using unauthenticated: 60/hour).'}`
+      );
+    }
+  }
+
+  if (res.status === 404) {
+    throw new Error('User not found on GitHub.');
+  }
+
+  if (!res.ok) {
+    throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
+  }
+
+  return res;
+}
+
 export async function fetchGitHubUserData(username: string) {
   try {
-    const userRes = await fetch(`https://api.github.com/users/${username}`);
-    if (!userRes.ok) {
-      if (userRes.status === 404) throw new Error('User not found');
-      if (userRes.status === 403) throw new Error('GitHub API rate limit exceeded. Please try again later.');
-      throw new Error('Failed to fetch user profile');
-    }
+    // 1. Fetch user profile
+    const userRes = await githubFetch(`https://api.github.com/users/${username}`);
     const user = await userRes.json();
 
-    // Fetch more repos for deeper analysis
-    const reposRes = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=30`);
-    if (!reposRes.ok) throw new Error('Failed to fetch repositories');
-
+    // 2. Fetch repos (single call, sorted by updated)
+    const reposRes = await githubFetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=30`);
     const allRepos = await reposRes.json();
 
     if (!Array.isArray(allRepos)) {
-      console.error('GitHub API returned non-array for repos:', allRepos);
-      throw new Error('Could not retrieve repository list. API limit might be reached.');
+      throw new Error('Could not retrieve repository list.');
     }
 
-    // Filter out forks, take top 10 by recency
+    // Filter out forks, take top 10
     const originalRepos = allRepos.filter((r: any) => !r.fork);
     const topRepos = originalRepos.slice(0, 10);
 
@@ -54,36 +89,63 @@ export async function fetchGitHubUserData(username: string) {
       .map(([lang, count]) => `${lang}: ${count} repos`)
       .join(', ');
 
-    // Deep-dive into top repos: README + commits
-    const repoDetails = await Promise.all(
+    // 3. Deep-dive into top repos: README + recent commits
+    // Use Promise.allSettled to not fail if one repo errors
+    const repoResults = await Promise.allSettled(
       topRepos.map(async (repo: any) => {
+        // Fetch README
+        let readme = 'No README found';
         try {
-          const readmeRes = await fetch(`https://api.github.com/repos/${username}/${repo.name}/readme`, {
-            headers: { Accept: 'application/vnd.github.raw' },
-          });
-          const readme = readmeRes.ok ? await readmeRes.text() : 'No README found';
+          const readmeRes = await fetch(
+            `https://api.github.com/repos/${username}/${repo.name}/readme`,
+            { headers: { ...getHeaders(), Accept: 'application/vnd.github.raw' } }
+          );
+          if (readmeRes.ok) {
+            readme = await readmeRes.text();
+          }
+        } catch { /* skip */ }
 
-          const commitsRes = await fetch(`https://api.github.com/repos/${username}/${repo.name}/commits?per_page=10`);
-          const commits: GitHubCommit[] = commitsRes.ok ? await commitsRes.json() : [];
+        // Fetch recent commits
+        let commits: any[] = [];
+        try {
+          const commitsRes = await fetch(
+            `https://api.github.com/repos/${username}/${repo.name}/commits?per_page=5`,
+            { headers: getHeaders() }
+          );
+          if (commitsRes.ok) {
+            const data = await commitsRes.json();
+            commits = Array.isArray(data) ? data : [];
+          }
+        } catch { /* skip */ }
 
-          return {
-            name: repo.name,
-            description: repo.description,
-            language: repo.language,
-            stars: repo.stargazers_count,
-            readme: readme.substring(0, 4000),
-            commits: (Array.isArray(commits) ? commits : []).map(c => ({
-              message: c.commit.message,
-              date: c.commit.author.date
-            }))
-          };
-        } catch (e) {
-          return { name: repo.name, description: repo.description, language: repo.language, stars: 0, readme: 'Error fetching details', commits: [] };
-        }
+        return {
+          name: repo.name,
+          description: repo.description || 'No description',
+          language: repo.language,
+          stars: repo.stargazers_count,
+          readme: readme.substring(0, 3000),
+          commits: commits.map((c: any) => ({
+            message: c.commit?.message || '',
+            date: c.commit?.author?.date || ''
+          }))
+        };
       })
     );
 
-    // Build a rich summary string for AI analysis
+    // Extract successful results, use fallback for failed ones
+    const repoDetails = repoResults.map((result, i) => {
+      if (result.status === 'fulfilled') return result.value;
+      return {
+        name: topRepos[i]?.name || 'unknown',
+        description: topRepos[i]?.description || '',
+        language: topRepos[i]?.language || null,
+        stars: topRepos[i]?.stargazers_count || 0,
+        readme: 'Could not fetch details',
+        commits: []
+      };
+    });
+
+    // Build summary string for AI analysis
     const summaryString = `
 USER: ${user.login}
 BIO: ${user.bio || 'N/A'}
@@ -100,9 +162,9 @@ ${repoDetails.map(r => `
 --- REPO: ${r.name} ---
 LANGUAGE: ${r.language || 'N/A'}
 STARS: ${r.stars}
-DESCRIPTION: ${r.description || 'No description'}
-README (first 1500 chars): ${r.readme.substring(0, 1500)}
-RECENT COMMITS (last 10): ${r.commits.map(c => `[${c.date}] ${c.message}`).join(' | ')}
+DESCRIPTION: ${r.description}
+README (excerpt): ${r.readme.substring(0, 1200)}
+RECENT COMMITS: ${r.commits.map(c => `[${c.date}] ${c.message}`).join(' | ') || 'No commits'}
 `).join('\n')}
     `;
 
@@ -112,7 +174,7 @@ RECENT COMMITS (last 10): ${r.commits.map(c => `[${c.date}] ${c.message}`).join(
       summaryString,
     };
   } catch (error: any) {
-    console.error('GitHub API error:', error);
+    console.error('GitHub API error:', error.message);
     throw error;
   }
 }
