@@ -1,0 +1,16 @@
+{
+  "placeholderImages": [
+    {
+      "id": "hero-bg",
+      "description": "Abstract code patterns and connections representing engineering DNA.",
+      "imageUrl": "https://images.unsplash.com/photo-1546980129-6d518dbb51b1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxjb2RlJTIwYWJzdHJhY3R8ZW58MHx8fHwxNzcwOTE3OTQ4fDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "code abstract"
+    },
+    {
+      "id": "persona-systems",
+      "description": "Abstract visualization of complex systems architecture.",
+      "imageUrl": "https://images.unsplash.com/photo-1529554951413-0110990a62a5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw2fHxzeXN0ZW0lMjBhcmNoaXRlY3R1cmV8ZW58MHx8fHwxNzcwOTE3OTQ4fDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "system architecture"
+    }
+  ]
+}
