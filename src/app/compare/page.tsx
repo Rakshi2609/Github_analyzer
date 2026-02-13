@@ -17,7 +17,13 @@ import {
   CheckCircle2,
   Sparkles,
 } from 'lucide-react';
-import { fetchGitHubUserData } from '@/app/lib/github-service';
+// GitHub data is fetched via API route to access server-side GITHUB_TOKEN
+async function fetchGitHubUserDataViaAPI(username: string) {
+  const res = await fetch(`/api/github/${encodeURIComponent(username)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch GitHub data');
+  return data;
+}
 import { provideAnalysisSummaryAndRecommendations } from '@/ai/flows/provide-analysis-summary-and-recommendations';
 import { compareCandidates, CompareCandidatesOutput } from '@/ai/flows/compare-candidates-flow';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -60,7 +66,7 @@ export default function ComparePage() {
       const summaries = await Promise.all(
         validUsernames.map(async (user, idx) => {
           setProgress(`Analyzing ${user} (${idx + 1}/${validUsernames.length})...`);
-          const data = await fetchGitHubUserData(user);
+          const data = await fetchGitHubUserDataViaAPI(user);
           const analysis = await provideAnalysisSummaryAndRecommendations({
             githubData: data.summaryString,
             ...(jobDescription ? { jobDescription } : {})
